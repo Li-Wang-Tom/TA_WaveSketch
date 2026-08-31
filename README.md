@@ -23,14 +23,14 @@
 
 ```bash
 # リポジトリをクローン
-git clone https://github.com/Li-Wang-Tom/TA_TimingAnalyzer.git
-cd TA_TimingAnalyzer
+git clone https://github.com/Li-Wang-Tom/TA_WaveSketch.git
+cd TA_WaveSketch
 
 # 依存関係をインストール
 pip install -r requirements.txt
 
 # アプリケーションを起動
-python TA_TimingAnalyzer.py
+python TA_WaveSketch.py
 ```
 
 ## 🚀 使用方法
@@ -60,8 +60,8 @@ python TA_TimingAnalyzer.py
 ### ファイル構成
 
 ```
-TA_TimingAnalyzer/
-├─ TA_TimingAnalyzer.py               # メインアプリケーション
+TA_WaveSketch/
+├─ TA_WaveSketch.py                   # メインアプリケーション
 ├─ requirements.txt                   # 依存関係
 ├─ README.md                          # このファイル
 ├─ LICENSE                            # ライセンス
