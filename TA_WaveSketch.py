@@ -7,10 +7,10 @@ TA_TimingAnalyzer (TA_TimingAnalyzer.py)
 を組み立ててられるGUIツール Techno仕様
 
 使い方:
-  ・グリッド 左クリック            : そのセルのON/OFF、またはData/Clearを切り替える
+  ・グリッド 左クリック            : ON/OFFは0.5グリッド単位、Data/Clearは1グリッド単位で切り替える
   ・グリッド 右クリック            : そのセルの自由テキスト/注釈を編集する
   ・「Arrow Mode」ボタン(トグル)    : ONにすると、全ての行に「スナップできる点」が
-    小さいドットで表示される(実際のON/OFF切り替わりの角＋各マスの中間点)。
+    小さいドットで表示される(実際のON/OFF切り替わりの角＋縦グリッド線と波形の交点＋各マスの中間点)。
     1回目のクリックで矢印の始点(赤く強調表示される)、2回目のクリックで終点を
     決めるとTrigger/Conditionを選ぶダイアログが出る。
     ドラッグではなく「クリック→クリック」の2ステップ方式にしているのは、
@@ -20,7 +20,9 @@ TA_TimingAnalyzer (TA_TimingAnalyzer.py)
     太字にする/戻す
   ・左側の信号名クリック            : 信号名を変更する
   ・左側のバッジクリック            : 所属テキストとバッジの色を変更する
-  ・左側の信号名を右クリック        : 複製・削除メニューを出す
+  ・左側の信号名を右クリック        : 上へ移動・下へ移動・複製・削除メニューを出す
+  ・「Timer Mode」ボタン           : 始点→同じ行の終点をクリックして0.5グリッド刻みのタイマーを作る
+    終点を選ぶ前にマウスを動かすと範囲をプレビューする。右クリックで始点をキャンセルする。
 
 このファイル内の命名ルール:
   - 自作の状態変数には先頭に "var" を付ける
@@ -171,50 +173,22 @@ class VarArrowKindDialog(simpledialog.Dialog):
 
 
 class VarAddTimerDialog(simpledialog.Dialog):
-    """タイマーバー追加ダイアログ。対象信号・範囲・色・ラベルを聞く。"""
-
-    def __init__(self, parent, title, signal_names, max_col):
-        self.varSignalNames = signal_names
-        self.varMaxCol = max_col
-        super().__init__(parent, title)
+    """チャート上で範囲を選んだ後、色とラベルだけを設定する。"""
 
     def body(self, master):
-        ttk.Label(master, text="Target signal").grid(row=0, column=0, sticky="w", pady=3)
-        self.varSignalChoice = tk.StringVar(value=self.varSignalNames[0] if self.varSignalNames else "")
-        combo = ttk.Combobox(master, textvariable=self.varSignalChoice, values=self.varSignalNames,
-                              state="readonly", width=20)
-        combo.grid(row=0, column=1, pady=3)
-
-        ttk.Label(master, text="Start column").grid(row=1, column=0, sticky="w", pady=3)
-        self.varStartEntry = ttk.Spinbox(master, from_=0, to=max(self.varMaxCol - 1, 0), width=6)
-        self.varStartEntry.set(0)
-        self.varStartEntry.grid(row=1, column=1, pady=3)
-
-        ttk.Label(master, text="End column").grid(row=2, column=0, sticky="w", pady=3)
-        self.varEndEntry = ttk.Spinbox(master, from_=1, to=self.varMaxCol, width=6)
-        self.varEndEntry.set(min(3, self.varMaxCol))
-        self.varEndEntry.grid(row=2, column=1, pady=3)
-
-        ttk.Label(master, text="Color").grid(row=3, column=0, sticky="w", pady=3)
+        ttk.Label(master, text="Color").grid(row=0, column=0, pady=3)
         self.varColorChoice = tk.StringVar(value="Pink")
-        color_combo = ttk.Combobox(master, textvariable=self.varColorChoice,
-                                    values=list(VAR_COLOR_PALETTE.keys()), state="readonly", width=10)
-        color_combo.grid(row=3, column=1, sticky="w", pady=3)
-
-        ttk.Label(master, text="Label").grid(row=4, column=0, sticky="w", pady=3)
-        self.varLabelEntry = ttk.Entry(master, width=20)
+        ttk.Combobox(master, textvariable=self.varColorChoice,
+                     values=list(VAR_COLOR_PALETTE.keys()), state="readonly", width=12).grid(row=0, column=1)
+        ttk.Label(master, text="Label").grid(row=1, column=0, pady=3)
+        self.varLabelEntry = ttk.Entry(master, width=24)
         self.varLabelEntry.insert(0, "Timer")
-        self.varLabelEntry.grid(row=4, column=1, pady=3)
-        return combo
+        self.varLabelEntry.grid(row=1, column=1, pady=3)
+        return self.varLabelEntry
 
     def apply(self):
-        self.result = {
-            "signal_name": self.varSignalChoice.get(),
-            "start_col": int(self.varStartEntry.get()),
-            "end_col": int(self.varEndEntry.get()),
-            "color": VAR_COLOR_PALETTE[self.varColorChoice.get()],
-            "label": self.varLabelEntry.get().strip(),
-        }
+        self.result = {"color": VAR_COLOR_PALETTE[self.varColorChoice.get()],
+                       "label": self.varLabelEntry.get().strip()}
 
 
 class VarManageArrowsDialog(simpledialog.Dialog):
@@ -342,13 +316,16 @@ class VarManageTimersDialog(simpledialog.Dialog):
             return
         timer = self.varTimersRef[selection[0]]
 
-        new_start = simpledialog.askinteger(
-            "Edit", "Start column", initialvalue=timer["start_col"], minvalue=0, maxvalue=max(self.varMaxSteps - 1, 0))
+        new_start = simpledialog.askfloat(
+            "Edit", "Start column (0.5 steps)", initialvalue=timer["start_col"], minvalue=0, maxvalue=self.varMaxSteps - 0.5)
         if new_start is None:
             return
-        new_end = simpledialog.askinteger(
-            "Edit", "End column", initialvalue=timer["end_col"], minvalue=1, maxvalue=self.varMaxSteps)
+        new_end = simpledialog.askfloat(
+            "Edit", "End column (0.5 steps)", initialvalue=timer["end_col"], minvalue=0.5, maxvalue=self.varMaxSteps)
         if new_end is None:
+            return
+        if new_end <= new_start or new_start * 2 != round(new_start * 2) or new_end * 2 != round(new_end * 2):
+            messagebox.showwarning("Input error", "Use 0.5 steps and an end after the start.")
             return
         new_label = simpledialog.askstring("Edit", "Label", initialvalue=timer["label"])
         if new_label is None:
@@ -408,7 +385,8 @@ class TimingChartApp:
         #   例: {"name":"Request", "type":"digital", "owner":"PLC", "owner_color":"#2ecc71"}
         self.varSignals = []
 
-        # varCellStates: 信号×時刻マスの状態。varSignalsと同じ並び順のリストのリスト。
+        # varCellStates: 信号×時刻セルの状態。digitalは0.5グリッド、dataは1グリッド単位。
+        # varSignalsと同じ並び順のリストのリスト。
         #   digital行 -> 各マスが "H"(High/ON) か "L"(Low/OFF)
         #   data行    -> 各マスが表示するテキスト(例 "Data","Clear")
         self.varCellStates = []
@@ -440,6 +418,10 @@ class TimingChartApp:
         # グリッド上にスナップ可能な点がドットで表示され、
         # 「始点ドットをクリック→終点ドットをクリック」の2ステップで
         # 矢印を作る(ドラッグではなくクリック→クリック方式)。
+        # タイマーもクリック→クリック方式。始点と仮終点は(行番号, 時間座標)で保持する。
+        self.varTimerModeActive = False
+        self.varTimerModeStartPoint = None
+        self.varTimerModeHoverPoint = None
         self.varArrowModeActive = False
         # varArrowModeStartPoint: Arrow Mode中に選んだ「始点」の
         # (行番号, x座標, レベル"H"/"L"/None) のタプル。まだ何も選んでいなければNone。
@@ -473,8 +455,8 @@ class TimingChartApp:
                 "name": f"Signal{i}", "type": "digital", "owner": owner_text,
                 "owner_color": owner_color,
             })
-            self.varCellStates.append(["L"] * self.varTimeSteps)
-            self.varCellAnnotations.append([""] * self.varTimeSteps)
+            self.varCellStates.append(["L"] * (self.varTimeSteps * 2))
+            self.varCellAnnotations.append([""] * (self.varTimeSteps * 2))
 
     # ============================================================
     # ツールバー(画面上部のボタン一式)を作る
@@ -518,13 +500,9 @@ class TimingChartApp:
         manage_arrows_button.pack(side=tk.LEFT, padx=3)
         ToolTip(manage_arrows_button, "Pick an arrow from a list to move or delete it individually.")
 
-        clear_arrows_button = ttk.Button(toolbar, text="Clear All Arrows", command=self.methodClearArrows)
-        clear_arrows_button.pack(side=tk.LEFT, padx=3)
-        ToolTip(clear_arrows_button, "Remove every arrow (Trigger and Condition) at once.")
-
-        add_timer_button = ttk.Button(toolbar, text="Add Timer Bar", command=self.methodAddTimer)
-        add_timer_button.pack(side=tk.LEFT, padx=3)
-        ToolTip(add_timer_button, "Add a colored bar (like an equipment timer) over a chosen signal and range.")
+        self.varTimerModeButton = ttk.Button(toolbar, text="Timer Mode: OFF", command=self.methodAddTimer)
+        self.varTimerModeButton.pack(side=tk.LEFT, padx=3)
+        ToolTip(self.varTimerModeButton, "Click a start, then an end on the same row (0.5 grid steps).\nRight-click cancels the start point.")
 
         manage_timers_button = ttk.Button(toolbar, text="Manage Timers", command=self.methodManageTimers)
         manage_timers_button.pack(side=tk.LEFT, padx=3)
@@ -553,9 +531,13 @@ class TimingChartApp:
         ToolTip(export_png_button, "Save the chart as a high-resolution PNG ready to paste into Excel or PowerPoint.")
 
         hint_text = (
-            "Grid left click = toggle ON/OFF or Data/Clear   |   Grid right click = edit text   |   Arrow Mode button = click a start dot then an end dot to place an arrow\n"
-            "Click the \"Timing chart\" header strip = toggle a bold marker on the nearest vertical line   |   Click a signal name = rename   |   Click a badge = change owner/color   |   Right-click a signal name = duplicate/delete"
+            "Grid left click = ON/OFF: 0.5 grid, Data/Clear: 1 grid   |   Grid right click = edit text   |   Arrow/Timer Mode = click start, then end (right-click to cancel)\n"
+            "Click the \"Timing chart\" header strip = toggle a bold marker on the nearest vertical line   |   Click a signal name = rename   |   Click a badge = change owner/color   |   Right-click a signal name = move up/down, duplicate/delete"
         )
+        # 色と大きい文字で現在のモード・次の操作を常に表示する。
+        self.varModeStatusLabel = tk.Label(self.root, anchor="w", justify=tk.LEFT,
+                                           font=("Segoe UI", 11, "bold"), padx=12, pady=8)
+        self.varModeStatusLabel.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(5, 3))
         hint_label = ttk.Label(self.root, text=hint_text, foreground="#555555", justify=tk.LEFT)
         hint_label.pack(side=tk.TOP, anchor="w", padx=8)
 
@@ -572,6 +554,7 @@ class TimingChartApp:
         # (Arrow Mode導入前はドラッグ判定のためbutton_release_eventも使っていたが、
         #  クリック→クリック方式に変えたことで不要になった)。
         self.canvas.mpl_connect("button_press_event", self.methodOnPress)
+        self.canvas.mpl_connect("motion_notify_event", self.methodOnTimerMotion)
 
     # ============================================================
     # Undo / Redo
@@ -593,6 +576,9 @@ class TimingChartApp:
         }
 
     def methodRestoreSnapshot(self, snapshot):
+        self.varArrowModeStartPoint = None
+        self.varTimerModeStartPoint = None
+        self.varTimerModeHoverPoint = None
         self.varSignals = snapshot["varSignals"]
         self.varCellStates = snapshot["varCellStates"]
         self.varCellAnnotations = snapshot["varCellAnnotations"]
@@ -628,6 +614,10 @@ class TimingChartApp:
         self.methodRestoreSnapshot(snapshot)
 
     def methodToggleArrowMode(self):
+        self.varTimerModeActive = False
+        self.varTimerModeStartPoint = None
+        self.varTimerModeHoverPoint = None
+        self.varTimerModeButton.config(text="Timer Mode: OFF")
         self.varArrowModeActive = not self.varArrowModeActive
         self.varArrowModeStartPoint = None  # モードが切り替わったら選択中の始点はリセット
         self.varArrowModeButton.config(text=f"Arrow Mode: {'ON' if self.varArrowModeActive else 'OFF'}")
@@ -651,8 +641,9 @@ class TimingChartApp:
             "owner": result["owner"], "owner_color": result["owner_color"],
         })
         default_state = "L" if result["type"] == "digital" else "Data"
-        self.varCellStates.append([default_state] * self.varTimeSteps)
-        self.varCellAnnotations.append([""] * self.varTimeSteps)
+        varCellCount = self.varTimeSteps * (2 if result["type"] == "digital" else 1)
+        self.varCellStates.append([default_state] * varCellCount)
+        self.varCellAnnotations.append([""] * varCellCount)
         self.methodRedraw()
 
     # 時間マス数(横方向の分割数)をSpinboxの値で更新する
@@ -663,34 +654,36 @@ class TimingChartApp:
             messagebox.showwarning("Input error", "Please enter a number.")
             return
 
+        if new_steps < 3 or new_steps > 40:
+            messagebox.showwarning("Input error", "Time steps must be between 3 and 40.")
+            return
+        self.varArrowModeStartPoint = None
+        self.varTimerModeStartPoint = None
+        self.varTimerModeHoverPoint = None
         self.methodPushUndoSnapshot()
 
         for row_index, row_states in enumerate(self.varCellStates):
-            if new_steps > len(row_states):
+            varCellCount = new_steps * (2 if self.varSignals[row_index]["type"] == "digital" else 1)
+            if varCellCount > len(row_states):
                 # マスが増える場合: 直前の状態を引き継いで埋める(急に無地になると変なので)
                 fill_value = row_states[-1] if row_states else (
                     "L" if self.varSignals[row_index]["type"] == "digital" else "Data"
                 )
-                row_states.extend([fill_value] * (new_steps - len(row_states)))
-            elif new_steps < len(row_states):
+                row_states.extend([fill_value] * (varCellCount - len(row_states)))
+            elif varCellCount < len(row_states):
                 # マスが減る場合: はみ出た分を後ろから切り捨てる
-                del row_states[new_steps:]
+                del row_states[varCellCount:]
 
             annotation_row = self.varCellAnnotations[row_index]
-            if new_steps > len(annotation_row):
-                annotation_row.extend([""] * (new_steps - len(annotation_row)))
-            elif new_steps < len(annotation_row):
-                del annotation_row[new_steps:]
+            if varCellCount > len(annotation_row):
+                annotation_row.extend([""] * (varCellCount - len(annotation_row)))
+            elif varCellCount < len(annotation_row):
+                del annotation_row[varCellCount:]
 
         self.varTimeSteps = new_steps
         # マス数が減った時、範囲外を指してしまうマーク列やタイマーを掃除する
         self.varMarkedColumns = {c for c in self.varMarkedColumns if c <= self.varTimeSteps}
         self.varTimers = [t for t in self.varTimers if t["end_col"] <= self.varTimeSteps]
-        self.methodRedraw()
-
-    def methodClearArrows(self):
-        self.methodPushUndoSnapshot()
-        self.varArrows = []
         self.methodRedraw()
 
     def methodManageArrows(self):
@@ -714,36 +707,107 @@ class TimingChartApp:
     # タイマーバー追加
     # ============================================================
     def methodAddTimer(self):
+        """タイマーモードを切り替える。矢印モードとは排他的にする。"""
         if not self.varSignals:
             messagebox.showwarning("Error", "There are no signals yet.")
             return
-
-        names = [s["name"] for s in self.varSignals]
-        dialog = VarAddTimerDialog(self.root, "Add Timer Bar", names, self.varTimeSteps)
-        result = dialog.result
-        if not result:
-            return
-        if result["end_col"] <= result["start_col"]:
-            messagebox.showwarning("Input error", "End column must come after start column.")
-            return
-
-        row_index = next((i for i, s in enumerate(self.varSignals) if s["name"] == result["signal_name"]), None)
-        if row_index is None:
-            return
-
-        self.methodPushUndoSnapshot()
-        self.varTimers.append({
-            "row": row_index,
-            "start_col": result["start_col"],
-            "end_col": result["end_col"],
-            "color": result["color"],
-            "label": result["label"],
-        })
+        self.varTimerModeActive = not self.varTimerModeActive
+        self.varTimerModeStartPoint = None
+        self.varTimerModeHoverPoint = None
+        self.varArrowModeActive = False
+        self.varArrowModeStartPoint = None
+        self.varArrowModeButton.config(text="Arrow Mode: OFF")
+        self.varTimerModeButton.config(text=f"Timer Mode: {'ON' if self.varTimerModeActive else 'OFF'}")
         self.methodRedraw()
 
-    # ============================================================
-    # チャート下の自由メモ
-    # ============================================================
+    def methodPickTimerPoint(self, varX, varY):
+        """時間軸上の位置を0.5グリッド刻みに丸める。"""
+        if varX is None or varY is None or not 0 <= varX <= self.varTimeSteps:
+            return None
+        varRow = self.methodPickRow(varY)
+        if varRow is None:
+            return None
+        return (varRow, int(varX * 2 + 0.5) / 2)
+
+    def methodHandleTimerModeClick(self, event):
+        if event.button == 3:
+            self.varTimerModeStartPoint = None
+            self.varTimerModeHoverPoint = None
+            self.methodRedraw()
+            return
+        if event.button != 1:
+            return
+        varPoint = self.methodPickTimerPoint(event.xdata, event.ydata)
+        if varPoint is None:
+            return
+        if self.varTimerModeStartPoint is None:
+            self.varTimerModeStartPoint = varPoint
+            self.varTimerModeHoverPoint = None
+            self.methodRedraw()
+            return
+        varRow, varStart = self.varTimerModeStartPoint
+        if varPoint[0] != varRow:
+            return  # 終点は同じ信号行だけ受け付ける。
+        varStart, varEnd = sorted((varStart, varPoint[1]))
+        if varStart == varEnd:
+            return  # 幅ゼロのタイマーは作らず、終点の再選択を待つ。
+        varDialog = VarAddTimerDialog(self.root, f"Timer: {varStart:g} - {varEnd:g}")
+        if varDialog.result:
+            self.methodPushUndoSnapshot()
+            self.varTimers.append({"row": varRow, "start_col": varStart, "end_col": varEnd,
+                                   "color": varDialog.result["color"], "label": varDialog.result["label"]})
+        self.varTimerModeStartPoint = None
+        self.varTimerModeHoverPoint = None
+        self.methodRedraw()
+
+    def methodOnTimerMotion(self, event):
+        if not self.varTimerModeActive:
+            return
+        varPoint = self.methodPickTimerPoint(event.xdata, event.ydata)
+        if (varPoint is not None and self.varTimerModeStartPoint is not None
+                and varPoint[0] != self.varTimerModeStartPoint[0]):
+            varPoint = None
+        if varPoint != self.varTimerModeHoverPoint:
+            self.varTimerModeHoverPoint = varPoint
+            self.methodRedraw()
+
+    def methodDrawTimerModePreview(self, ax, varRowCount):
+        # 全ての選択可能位置に0.5刻みの点を置く。始点選択後は対象行を強調する。
+        varSelectedRow = (self.varTimerModeStartPoint[0]
+                          if self.varTimerModeStartPoint is not None else None)
+        varXs = [varIndex * 0.5 for varIndex in range(self.varTimeSteps * 2 + 1)]
+        for varRowIndex in range(varRowCount):
+            varEnabled = varSelectedRow is None or varRowIndex == varSelectedRow
+            ax.plot(varXs, [varRowCount - varRowIndex - 0.55] * len(varXs),
+                    linestyle="None", marker="o", markersize=5,
+                    color="#c56a12" if varEnabled else "#bbbbbb",
+                    alpha=0.85 if varEnabled else 0.25, zorder=7)
+        # 始点選択前も、クリックされる点を青く表示する。
+        if self.varTimerModeHoverPoint is not None:
+            varHoverRow, varHoverX = self.varTimerModeHoverPoint
+            if varHoverRow < varRowCount and (varSelectedRow is None or varHoverRow == varSelectedRow):
+                varHoverY = varRowCount - varHoverRow - 0.55
+                if self.varTimerModeHoverPoint != self.varTimerModeStartPoint:
+                    ax.plot(varHoverX, varHoverY, marker="o", markersize=9,
+                            color="#1976d2", markeredgecolor="white", zorder=9)
+                    varLabel = "START?" if varSelectedRow is None else "END?"
+                    ax.text(varHoverX, varHoverY + 0.3, f"{varLabel} {varHoverX:g}",
+                            fontsize=8, color="#1976d2", ha="center", zorder=10)
+        if self.varTimerModeStartPoint is None:
+            return
+        varRow, varStart = self.varTimerModeStartPoint
+        if varRow >= varRowCount:
+            return
+        varY = varRowCount - varRow - 0.55
+        ax.plot(varStart, varY, marker="o", markersize=10, color="#e74c3c",
+                markeredgecolor="white", zorder=9)
+        ax.text(varStart, varY - 0.3, f"START {varStart:g}", fontsize=8,
+                color="#e74c3c", ha="center", zorder=10)
+        if self.varTimerModeHoverPoint is not None:
+            varEnd = self.varTimerModeHoverPoint[1]
+            ax.add_patch(Rectangle((min(varStart, varEnd), varY - 0.25), abs(varEnd - varStart),
+                                   0.5, facecolor="#ff6f61", alpha=0.3, edgecolor="#e74c3c", zorder=6))
+
     def methodEditNote(self):
         new_note = simpledialog.askstring(
             "Edit Note", "Note shown below the chart (blank to remove):", initialvalue=self.varNoteText
@@ -769,6 +833,9 @@ class TimingChartApp:
 
         # ---- Arrow Modeが有効な間は、他の操作は全部無効にしてクリックを
         #      矢印の始点/終点選択だけに使う(誤操作防止のため意図的な仕様) ----
+        if self.varTimerModeActive:
+            self.methodHandleTimerModeClick(event)
+            return
         if self.varArrowModeActive:
             self.methodHandleArrowModeClick(event)
             return
@@ -791,9 +858,10 @@ class TimingChartApp:
             return
 
         # ---- ここまで来たら時間グリッド本体 ----
-        col_index = int(event.xdata)
-        if col_index < 0 or col_index >= self.varTimeSteps:
+        if not 0 <= event.xdata < self.varTimeSteps:
             return
+        varCellScale = 2 if self.varSignals[row_index]["type"] == "digital" else 1
+        col_index = int(event.xdata * varCellScale)
 
         if event.button == 1:
             self.methodToggleCellState(row_index, col_index)
@@ -806,6 +874,8 @@ class TimingChartApp:
         row_count = len(self.varSignals)
         # 信号は上から順に並んでいて、y座標は下がゼロ・上に行くほど大きい値になっているので、
         # 「行数-y座標」を整数に切り捨てると「上から何番目か(0始まり)」が求まる
+        if not 0 < ydata <= row_count:
+            return None
         row_from_top = int(row_count - ydata)
         if row_from_top < 0 or row_from_top >= row_count:
             return None
@@ -859,15 +929,15 @@ class TimingChartApp:
             # 行の一番左端/右端は、その端の実際の状態1点だけを候補にする
             if n > 0:
                 candidates.add((0.0, states[0]))
-                candidates.add((float(n), states[n - 1]))
-            # 内部の切り替わり境界: ONの角(H)とOFFの角(L)を両方候補にする
+                candidates.add((n * 0.5, states[n - 1]))
+            # 各縦グリッド線と波形の交点を候補にする。
+            # 同じ状態が続く境界は1点、切り替わり境界はH/Lの2点になる。
             for col in range(1, n):
-                if states[col] != states[col - 1]:
-                    candidates.add((float(col), "H"))
-                    candidates.add((float(col), "L"))
-            # 各マスの中間点: そのマス自身の状態1点だけ
+                candidates.add((col * 0.5, states[col - 1]))
+                candidates.add((col * 0.5, states[col]))
+            # 半グリッドセルの中間点: そのセル自身の状態1点だけ
             for col in range(n):
-                candidates.add((col + 0.5, states[col]))
+                candidates.add(((col + 0.5) * 0.5, states[col]))
             return sorted(candidates, key=lambda pair: (pair[0], pair[1]))
 
         return [(c * 0.5, None) for c in range(0, n * 2 + 1)]
@@ -876,6 +946,8 @@ class TimingChartApp:
     # (x座標とH/Lの高さ)が一番近いドットを1つ選ぶ。同じx座標でもH/Lで
     # 見た目の高さが違うので、x距離だけでなく実際のy座標との距離で比べる。
     def methodPickNearestSnapPoint(self, xdata, ydata):
+        if not 0 <= xdata <= self.varTimeSteps:
+            return None
         row_index = self.methodPickRow(ydata)
         if row_index is None:
             return None
@@ -945,6 +1017,11 @@ class TimingChartApp:
     def methodShowRowContextMenu(self, event, row_index):
         signal_name = self.varSignals[row_index]["name"]
         menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="Move up", state=tk.NORMAL if row_index > 0 else tk.DISABLED,
+                         command=lambda: self.methodMoveSignal(row_index, -1))
+        menu.add_command(label="Move down", state=tk.NORMAL if row_index < len(self.varSignals) - 1 else tk.DISABLED,
+                         command=lambda: self.methodMoveSignal(row_index, 1))
+        menu.add_separator()
         menu.add_command(label=f"Duplicate '{signal_name}'", command=lambda: self.methodDuplicateRow(row_index))
         menu.add_command(label=f"Delete '{signal_name}'", command=lambda: self.methodDeleteRow(row_index))
         try:
@@ -952,6 +1029,26 @@ class TimingChartApp:
             menu.tk_popup(event.guiEvent.x_root, event.guiEvent.y_root)
         finally:
             menu.grab_release()
+
+    def methodMoveSignal(self, varRowIndex, varDirection):
+        """隣の行と入れ替え、矢印・タイマーの所属先も同時に更新する。"""
+        varTarget = varRowIndex + varDirection
+        if not 0 <= varRowIndex < len(self.varSignals) or not 0 <= varTarget < len(self.varSignals):
+            return
+        self.methodPushUndoSnapshot()
+        for varRows in (self.varSignals, self.varCellStates, self.varCellAnnotations):
+            varRows[varRowIndex], varRows[varTarget] = varRows[varTarget], varRows[varRowIndex]
+        varRowMap = {varRowIndex: varTarget, varTarget: varRowIndex}
+        for varArrow in self.varArrows:
+            for varEnd in ("start", "end"):
+                varRow, varX, varLevel = varArrow[varEnd]
+                varArrow[varEnd] = (varRowMap.get(varRow, varRow), varX, varLevel)
+        for varTimer in self.varTimers:
+            varTimer["row"] = varRowMap.get(varTimer["row"], varTimer["row"])
+        self.varArrowModeStartPoint = None
+        self.varTimerModeStartPoint = None
+        self.varTimerModeHoverPoint = None
+        self.methodRedraw()
 
     def methodDuplicateRow(self, row_index):
         self.methodPushUndoSnapshot()
@@ -1073,9 +1170,37 @@ class TimingChartApp:
     # 図全体を再描画する
     # ============================================================
     def methodRedraw(self):
+        self.methodUpdateModeStatus()
         self.ax.clear()
         self.methodDrawChart(self.ax)
         self.canvas.draw()
+
+    def methodUpdateModeStatus(self):
+        """モードと始点・終点の選択段階を色と文字で明示する。"""
+        if self.varTimerModeActive:
+            varBackground, varForeground = "#fff0d9", "#874300"
+            if self.varTimerModeStartPoint is None:
+                varText = "TIMER MODE  |  STEP 1/2: Click a dot to choose START (0.5 grid)"
+            else:
+                varRow, varStart = self.varTimerModeStartPoint
+                varText = f"TIMER MODE  |  STEP 2/2: START {varStart:g} - Click END on row {varRow + 1}"
+                if self.varTimerModeHoverPoint is not None:
+                    varEnd = self.varTimerModeHoverPoint[1]
+                    varText += f"  |  END {varEnd:g} / Width {abs(varEnd - varStart):g}"
+            varText += "\nOrange = available dots / Red = START / Blue = candidate  |  Right-click: cancel  |  Timer Mode button: exit"
+        elif self.varArrowModeActive:
+            varBackground, varForeground = "#eee3fa", "#632795"
+            if self.varArrowModeStartPoint is None:
+                varText = "ARROW MODE  |  STEP 1/2: Click a dot to choose START"
+            else:
+                varRow, varX, varLevel = self.varArrowModeStartPoint
+                varText = f"ARROW MODE  |  STEP 2/2: START row {varRow + 1}, x={varX:g} - Click an END dot"
+            varText += "\nRed = selected START  |  Right-click: cancel  |  Arrow Mode button: exit"
+        else:
+            varBackground, varForeground = "#e8f2ec", "#245c38"
+            varText = "EDIT MODE  |  Click cells to edit ON/OFF (0.5 grid) or Data/Clear (1 grid)"
+            varText += "\nChoose Arrow Mode or Timer Mode to place arrows or timers."
+        self.varModeStatusLabel.config(text=varText, background=varBackground, foreground=varForeground)
 
     # 外枠の罫線と、「Signal」列と「Timing chart」列を区切る縦線、
     # ヘッダ内の区切り線(タイトルと列番号の間)、各信号行同士を区切る薄いグレーの
@@ -1160,6 +1285,11 @@ class TimingChartApp:
             else:
                 ax.plot([col, col], [-0.3, row_count + 0.5], linestyle=":", color="#8fd19e", linewidth=0.8, zorder=0)
 
+        # 半グリッドの編集位置を薄い補助線で示す。整数位置の目盛は従来通り。
+        for varHalfColumn in range(self.varTimeSteps):
+            ax.plot([varHalfColumn + 0.5] * 2, [0, row_count], linestyle=":",
+                    color="#dbe9dd", linewidth=0.5, zorder=0)
+
         ax.text((self.varTimeSteps) / 2, row_count + 1.0, "Timing chart", fontsize=13, ha="center", va="center")
         ax.text((self.varLabelAreaLeft) / 2, row_count + 1.0, "Signal", fontsize=12, fontweight="bold",
                 ha="center", va="center")
@@ -1196,6 +1326,9 @@ class TimingChartApp:
         if self.varArrowModeActive:
             self.methodDrawArrowModeDots(ax, row_count)
 
+        if self.varTimerModeActive and ax is self.ax:
+            self.methodDrawTimerModePreview(ax, row_count)
+
         self.methodDrawLegend(ax, row_count)
 
         if self.varNoteText:
@@ -1217,17 +1350,17 @@ class TimingChartApp:
 
         for col in range(n):
             y = high_y if row_state_list[col] == "H" else low_y
-            ax.plot([col, col + 1], [y, y], color="black", linewidth=1.4, zorder=2)
+            ax.plot([col * 0.5, (col + 1) * 0.5], [y, y], color="black", linewidth=1.4, zorder=2)
 
             # 1つ前のマスと高さが違えば、境目に縦線を引いて「階段状」の波形にする
             if col > 0:
                 prev_y = high_y if row_state_list[col - 1] == "H" else low_y
                 if prev_y != y:
-                    ax.plot([col, col], [prev_y, y], color="black", linewidth=1.4, zorder=2)
+                    ax.plot([col * 0.5, col * 0.5], [prev_y, y], color="black", linewidth=1.4, zorder=2)
 
             annotation_text = annotation_list[col] if col < len(annotation_list) else ""
             if annotation_text:
-                ax.text(col + 0.15, top_y - 0.12, annotation_text, fontsize=7, color="white",
+                ax.text(col * 0.5 + 0.075, top_y - 0.12, annotation_text, fontsize=7, color="white",
                         ha="center", va="center", zorder=4,
                         bbox=dict(boxstyle="round,pad=0.15", facecolor="#ff8c42", edgecolor="none"))
 
@@ -1367,7 +1500,7 @@ class TimingChartApp:
             ax.text(label_x, label_y, arrow["label"], fontsize=7, color=color, ha="center", zorder=5)
 
     # Arrow Mode中に表示するドットを描く: 各行のスナップ可能な点(ON角/OFF角/
-    # マス中間点)すべてに、小さいグレーの点を実際の波形の線の位置に重ねて表示する。
+    # 縦グリッド線との交点/マス中間点)すべてに、小さいグレーの点を実際の波形の線の位置に重ねて表示する。
     # 選択中の始点だけは大きく赤いドットにする。
     def methodDrawArrowModeDots(self, ax, row_count):
         for row_index, signal in enumerate(self.varSignals):
@@ -1429,6 +1562,7 @@ class TimingChartApp:
             return
 
         data = {
+            "varDigitalCellWidth": 0.5,
             "varSignals": self.varSignals,
             "varCellStates": self.varCellStates,
             "varCellAnnotations": self.varCellAnnotations,
@@ -1469,8 +1603,19 @@ class TimingChartApp:
         # .get(キー, デフォルト値) にしているのは、その機能が無かった頃の
         # 古いJSONファイルを読み込んでもエラーにならないようにするため
         self.varCellAnnotations = data.get(
-            "varCellAnnotations", [[""] * self.varTimeSteps for _ in self.varSignals]
+            "varCellAnnotations", [[""] * len(varRow) for varRow in self.varCellStates]
         )
+        if data.get("varDigitalCellWidth", 1.0) == 1.0:
+            for varRowIndex, varSignal in enumerate(self.varSignals):
+                if varSignal["type"] == "digital":
+                    self.varCellStates[varRowIndex] = [
+                        varState for varState in self.varCellStates[varRowIndex] for varHalf in range(2)]
+                    self.varCellAnnotations[varRowIndex] = [
+                        varText for varAnnotation in self.varCellAnnotations[varRowIndex]
+                        for varText in (varAnnotation, "")]
+        self.varArrowModeStartPoint = None
+        self.varTimerModeStartPoint = None
+        self.varTimerModeHoverPoint = None
         self.varTimers = data.get("varTimers", [])
         self.varMarkedColumns = set(data.get("varMarkedColumns", []))
         self.varNoteText = data.get("varNoteText", "")
